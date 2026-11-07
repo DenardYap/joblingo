@@ -5,7 +5,7 @@ services:
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile
-    preDeployCommand: npm run db:migrate
+    preDeployCommand: node dist/server/migrate.mjs
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
