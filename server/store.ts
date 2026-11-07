@@ -42,7 +42,7 @@ export async function get<T>(kind: string, id: string): Promise<T | null> { cons
 export async function put(kind: string, id: string, data: unknown) { await(await database()).query('INSERT INTO workspace_records(kind,id,data,workspace_id) VALUES ($1,$2,$3,$4) ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=excluded.data', [kind,id,JSON.stringify(data),workspaceId()]); }
 export async function putIfMissing(kind: string, id: string, data: unknown) { await(await database()).query('INSERT INTO workspace_records(kind,id,data,workspace_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', [kind,id,JSON.stringify(data),workspaceId()]); }
 export async function patch<T>(kind: string, id: string, data: unknown): Promise<T | null> { const r = await(await database()).query('UPDATE workspace_records SET data=data || $3::jsonb WHERE kind=$1 AND id=$2 AND workspace_id=$4 RETURNING data', [kind,id,JSON.stringify(data),workspaceId()]); return r.rows[0]?.data as T ?? null; }
-export async function discoveredJob(id: string, data: unknown) { await(await database()).query("INSERT INTO workspace_records(kind,id,data,workspace_id) VALUES ('jobs',$1,$2,$3) ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=workspace_records.data || (excluded.data - 'saved' - 'status' - 'notes' - 'appliedAt' - 'foundAt')", [id,JSON.stringify(data),workspaceId()]); }
+export async function discoveredJob(id: string, data: unknown) { await(await database()).query("INSERT INTO workspace_records(kind,id,data,workspace_id) VALUES ('jobs',$1,$2,$3) ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=workspace_records.data || (excluded.data - 'saved' - 'status' - 'notes' - 'appliedAt' - 'trackingUpdatedAt' - 'foundAt')", [id,JSON.stringify(data),workspaceId()]); }
 export async function preferences(){await putIfMissing('settings','main',defaultPreferences);return preferencesSchema.parse(await get('settings','main'));}
 export async function claim(owner: string): Promise<boolean> {
   const r=await(await database()).query("INSERT INTO search_lease(id,owner,expires_at,workspace_id) VALUES (1,$1,now()+interval '5 minutes',$2) ON CONFLICT(workspace_id,id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at WHERE search_lease.expires_at<now() RETURNING id",[owner,workspaceId()]);return r.rows.length===1;
@@ -54,19 +54,20 @@ export async function reconcileRuns() {
     AND NOT EXISTS(SELECT 1 FROM search_lease l WHERE l.workspace_id=r.workspace_id AND l.owner=r.id AND l.expires_at>now())`,[workspaceId()]);
 }
 export async function finishRun(owner: string, jobs: Job[], result: Partial<Run>, refreshedJobs: Job[] = []) {
+  result={...result,matchedJobIds:jobs.map(job=>job.id)};
   const saved = await(await database()).query(`WITH owned AS (
       SELECT id FROM search_lease WHERE workspace_id=$5 AND id=1 AND owner=$1 AND expires_at>now() FOR UPDATE
     ), saved_jobs AS (
       INSERT INTO workspace_records(kind,id,data,workspace_id)
       SELECT 'jobs',job->>'id',job,$5 FROM jsonb_array_elements($2::jsonb) job WHERE EXISTS(SELECT 1 FROM owned)
-      ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=workspace_records.data || (excluded.data - 'saved' - 'status' - 'notes' - 'appliedAt' - 'foundAt') RETURNING id
+      ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=workspace_records.data || (excluded.data - 'saved' - 'status' - 'notes' - 'appliedAt' - 'trackingUpdatedAt' - 'foundAt') RETURNING id
     ), queued_research AS (
       INSERT INTO workspace_records(kind,id,data,workspace_id)
       SELECT 'research',id,jsonb_build_object('id','','jobId',id,'status','queued','createdAt',now()),$5 FROM saved_jobs
       ON CONFLICT(workspace_id,kind,id) DO NOTHING
     ), refreshed_jobs AS (
       UPDATE workspace_records AS existing SET data=existing.data ||
-        (assessed - 'saved' - 'status' - 'notes' - 'appliedAt' - 'foundAt' - 'lastFoundAt' - 'foundOn')
+        (assessed - 'saved' - 'status' - 'notes' - 'appliedAt' - 'trackingUpdatedAt' - 'foundAt' - 'lastFoundAt' - 'foundOn')
       FROM jsonb_array_elements($4::jsonb) assessed
       WHERE existing.workspace_id=$5 AND existing.kind='jobs' AND existing.id=assessed->>'id' AND EXISTS(SELECT 1 FROM owned)
         AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) chosen WHERE chosen->>'id'=existing.id)

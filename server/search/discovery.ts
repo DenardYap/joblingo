@@ -1,7 +1,7 @@
 import type { Preferences, Run } from '../../shared/workspace.js';
 
 export type Candidate = { title: string; url: string; publishedDate?: string | null };
-export type SearchQuery = { query: string; days: number };
+export type SearchQuery = { query: string; days: number; agent?: boolean };
 export type DiscoveryProgress = { reviewed: number; discovered: number; duplicates: number; searches: number; matched: number; phase: 'Searching' | 'Reviewing' };
 export type DiscoveryStop = NonNullable<Run['stopReason']>;
 
@@ -20,6 +20,7 @@ export function discoveryPlan(config: Preferences, skills: string[]): SearchQuer
     .split(/,|\s+(?:or|and)\s+/i).map(value => value.trim())
     .filter(value => value.length >= 3 && value.length <= 120 && !/^(?:closely|anything|related|adjacent)/i.test(value)).slice(0, 8);
   const plan: SearchQuery[] = [
+    {query:'Build a distinct job list across sources',days:config.maxPostingAgeDays,agent:true},
     { query: `Posted in the past 24 hours. ${broad} ${skills.length ? `Relevant skills: ${skills.join(', ')}.` : ''}`, days: 1 },
     ...(config.preferPublicCompanies ? [{ query: `Publicly traded employers, posted in the past 24 hours. ${broad}`, days: 1 }] : []),
     ...(config.maxPostingAgeDays > 1 ? [{ query: `${recent} ${broad}`, days: config.maxPostingAgeDays }] : []),
@@ -32,16 +33,29 @@ export function discoveryPlan(config: Preferences, skills: string[]): SearchQuer
 
 /** Continue discovery after a sparse first response; never count duplicates or rejected jobs toward the target. */
 export async function discoverUntilTarget<T>(options: {
-  target: number; maxReviewed: number; plan: SearchQuery[]; initial?: Candidate[];
+  target: number; maxReviewed: number; plan: SearchQuery[]; initial?: Candidate[]; retained?: {candidate:Candidate;match:T}[];
   key: (candidate: Candidate) => string | null;
   search: (query: SearchQuery, count: number) => Promise<Candidate[]>;
   review: (candidate: Candidate) => Promise<T | null>;
+  sameMatch?: (a:T,b:T) => boolean;
+  mergeMatches?: (copies:T[]) => T;
   progress: (progress: DiscoveryProgress, matches: readonly T[]) => Promise<void>;
 }) {
   const matches: T[] = [];
   const queue: Candidate[] = [];
   const seen = new Set<string>();
   const stats: DiscoveryProgress = { reviewed: 0, discovered: 0, duplicates: 0, searches: 0, matched: 0, phase: 'Searching' };
+  const accept = (match:T) => {
+    const duplicate = options.sameMatch ? matches.findIndex(existing => options.sameMatch!(existing,match)) : -1;
+    if (duplicate < 0) matches.push(match);
+    else { stats.duplicates++; if(options.mergeMatches)matches[duplicate]=options.mergeMatches([matches[duplicate]!,match]); }
+    stats.matched=Math.min(options.target,matches.length);
+  };
+  for(const item of options.retained ?? []) {
+    const key=options.key(item.candidate);
+    if(!key || seen.has(key)) continue;
+    seen.add(key);accept(item.match);stats.reviewed++;stats.discovered++;
+  }
   const add = (candidates: Candidate[]) => {
     for (const candidate of candidates) {
       const key = options.key(candidate);
@@ -75,7 +89,7 @@ export async function discoverUntilTarget<T>(options: {
     for (const result of results) {
       if (result.status === 'fulfilled') {
         stats.reviewed++;
-        if (result.value !== null) matches.push(result.value);
+        if (result.value !== null) accept(result.value);
       } else { error ??= result.reason; }
     }
     stats.matched = Math.min(options.target, matches.length);

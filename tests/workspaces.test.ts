@@ -60,3 +60,21 @@ test('resume removal is repeatable, preserves source files, and clears only its 
   assert.equal((await preferences()).matchingResumeId,'remove-me');
  });
 });
+
+test('consolidated tracking synchronizes copies without crossing workspaces or deleting draft references',async()=>{
+ const {examples}=await import('../server/fixtures.js');
+ const {groupedJob,updateJobTracking}=await import('../server/job-groups.js');
+ const a={...examples()[0]!,id:'copy-a',example:false,company:'Example Employer',url:'https://example.test/a',saved:true,status:'Applied' as const};
+ const b={...a,id:'copy-b',url:'https://example.test/b',saved:false,status:'Not started' as const};
+ for(const space of ['dedup-alice','dedup-bob'])await inWorkspace(space,async()=>{
+  await put('jobs',a.id,a);await put('jobs',b.id,b);await put('drafts','draft',{id:'draft',jobId:b.id,text:'Preserved'});
+ });
+ await inWorkspace('dedup-alice',async()=>{
+  assert.equal((await groupedJob(a.id))?.relatedJobIds?.length,2);
+  await updateJobTracking(a.id,{saved:false,status:'Interviewing',notes:'Follow up Friday'});
+  for(const id of [a.id,b.id]){const stored=await get<typeof a>('jobs',id);assert.equal(stored?.saved,false);assert.equal(stored?.status,'Interviewing');}
+  assert.deepEqual(await get('drafts','draft'),{id:'draft',jobId:b.id,text:'Preserved'});
+  assert.equal((await list('jobs')).length,2);
+ });
+ await inWorkspace('dedup-bob',async()=>{assert.equal((await get<typeof a>('jobs',a.id))?.saved,true);assert.equal((await get<typeof b>('jobs',b.id))?.status,'Not started');});
+});

@@ -63,3 +63,25 @@ test('each completed review batch exposes verified matches for durable checkpoin
  });
  assert.ok(checkpoints.includes(3));assert.equal(checkpoints.at(-1),3);
 });
+
+test('retrying retains qualified jobs and spends review calls on the remaining target',async()=>{
+ const retained=Array.from({length:19},(_,i)=>({candidate:candidate(i),match:candidate(i)}));
+ let reviews=0;
+ const result=await discoverUntilTarget({target:30,maxReviewed:360,plan,key,progress,retained,
+  search:async()=>Array.from({length:30},(_,i)=>candidate(i)),
+  review:async item=>{reviews++;return item;},
+ });
+ assert.equal(result.matches.length,30);assert.equal(reviews,11);
+ assert.equal(result.stats.reviewed,30);assert.equal(result.stopReason,'target_reached');
+});
+
+test('different URLs for the same role do not fill the 30 distinct-job target',async()=>{
+ let searches=0;
+ const result=await discoverUntilTarget({target:30,maxReviewed:100,plan,key,progress,
+  search:async()=>++searches===1 ? Array.from({length:30},(_,i)=>candidate(i)) : Array.from({length:20},(_,i)=>candidate(i+30)),
+  review:async item=>({role:Number(item.title.slice(4))<30 ? Math.floor(Number(item.title.slice(4))/3) : Number(item.title.slice(4))-20}),
+  sameMatch:(a,b)=>a.role===b.role,
+ });
+ assert.equal(result.matches.length,30);assert.equal(result.stats.reviewed,50);
+ assert.equal(result.stats.duplicates,20);assert.equal(result.stopReason,'target_reached');
+});

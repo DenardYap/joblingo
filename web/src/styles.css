@@ -272,3 +272,5 @@ input[type=checkbox] { accent-color: var(--blue); width: 16px; height: 16px; }
 .resumes-page [role="status"] .text-button { margin-left: 10px; }
 .run-row > span { flex-shrink: 0; }
 .run-row p, .run-row small { line-height: 1.5; }
+
+.job-source-link { display: block; width: fit-content; margin-bottom: 4px; }

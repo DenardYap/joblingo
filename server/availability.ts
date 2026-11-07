@@ -6,9 +6,10 @@ import { publicGet } from './public-web.js';
 import { patch } from './store.js';
 import { LOGO_VERSION } from './company-logo.js';
 import type { Job } from '../shared/workspace.js';
+import { applicationIdentity } from '../shared/job-deduplication.js';
 
 type RecordData = Record<string, any>;
-export type ListingCheck = { availability: 'Open' | 'Closed' | 'Unverified'; availabilityReason: string; checkedAt: string; postedAt: string | null; postedAtSource: string | null; companyLogoUrl: string | null; companyWebsite: string | null; text: string };
+export type ListingCheck = { availability: 'Open' | 'Closed' | 'Unverified'; availabilityReason: string; checkedAt: string; postedAt: string | null; postedAtSource: string | null; companyLogoUrl: string | null; companyWebsite: string | null; text: string; applicationIdentity?: Job['applicationIdentity'] };
 const CLOSED = /(?:this (?:job|position|role|listing) (?:has expired|is closed|has been (?:closed|filled)|is no longer available)|(?:no longer|not currently) accepting (?:new )?applications|(?:job|position|role) (?:has been filled|is no longer (?:open|available))|applications (?:are|have been) closed)/i;
 const normalized = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 function matchesTitle(actual: string, expected?: string) { return Boolean(normalized(actual)) && (!expected || normalized(actual).includes(normalized(expected)) || normalized(expected).includes(normalized(actual))); }
@@ -52,6 +53,8 @@ export async function checkListing(url: string, title?: string): Promise<Listing
     if (page.status >= 200 && page.status < 300) {
       const meta = pageMetadata(page.body.toString('utf8'),page.url,title);
       Object.assign(result,{text:meta.text,postedAt:meta.date,postedAtSource:meta.date ? url : null,companyLogoUrl:meta.companyLogoUrl,companyWebsite:meta.companyWebsite});
+      const identities=[...new Map(meta.links.map(applicationIdentity).filter(item=>item!==null).map(item=>[`${item.board}/${item.id}`,item])).values()];
+      result.applicationIdentity=applicationIdentity(page.url) ?? (meta.job && identities.length===1 ? identities[0] : undefined);
       const notice = meta.text.match(CLOSED)?.[0];
       if (notice) return closed(`The live page says: “${notice}”.`);
       if (Number.isFinite(meta.expires) && meta.expires < Date.now()) return closed('The employer’s listing expiration date has passed.');

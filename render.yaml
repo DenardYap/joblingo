@@ -17,13 +17,15 @@ services:
       - key: APP_PASSWORD
         sync: false
       - key: SESSION_SECRET
-        generateValue: true
+        sync: false
       - key: EXA_API_KEY
         sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
-        value: gpt-6-astra
+        value: gpt-6.1-sol
+      - key: OPENAI_REASONING_EFFORT
+        value: high
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -58,10 +60,17 @@ services:
           type: web
           name: personal-job-search
           envVarKey: OPENAI_MODEL
+      - key: OPENAI_REASONING_EFFORT
+        fromService:
+          type: web
+          name: personal-job-search
+          envVarKey: OPENAI_REASONING_EFFORT
 
 databases:
   - name: job-search-db
     plan: basic-256mb
+    diskSizeGB: 1
+    storageAutoscalingEnabled: false
     databaseName: job_search
     user: job_search
     ipAllowList: []

@@ -38,6 +38,8 @@ export type CompanyListing = {status:'Public'|'Private'|'Unknown';exchange:strin
 export type Job = ExtractedJob & {
   id: string; source: string; url: string | null; foundAt: string; lastFoundAt: string; foundOn: string[];
   saved: boolean; status: typeof statuses[number]; notes: string; appliedAt: string | null; example: boolean;
+  trackingUpdatedAt?: string; relatedJobIds?: string[]; listings?: {id:string;url:string;source:string}[];
+  applicationIdentity?: {board:string;id:string};
   availability?: 'Open' | 'Closed' | 'Unverified'; availabilityReason?: string; checkedAt?: string;
   companyLogoUrl?: string | null; companyLogoVersion?: string; companyWebsite?: string | null; postedAtSource?: string | null;
   companyListing?: CompanyListing; publicCompanyBonus?: number; baseScore?: number; publicPreferenceApplied?: boolean;
@@ -57,8 +59,9 @@ export function listingState(job: Job): 'Open' | 'Closed' | 'Unverified' {
   return job.availability === 'Open' && job.checkedAt && Date.now() - Date.parse(job.checkedAt) < 86400000 ? 'Open' : 'Unverified';
 }
 export type Run = { id: string; startedAt: string; completedAt: string | null; status: 'Running' | 'Completed' | 'Failed'; trigger: 'Manual' | 'Scheduled'; found: number; reviewed: number; excluded: number; error: string | null; scheduledKey: string | null; attempt: number;
-  target?: number; postingWindowDays?: number; discovered?: number; duplicates?: number; searches?: number;
-  phase?: 'Preparing' | 'Searching' | 'Reviewing'; stopReason?: 'target_reached' | 'searches_exhausted' | 'review_limit' | 'provider_error';
+  target?: number; postingWindowDays?: number; discovered?: number; duplicates?: number; searches?: number; retained?: number;
+  matchedJobIds?: string[];
+  phase?: 'Preparing' | 'Searching' | 'Reviewing'; stopReason?: 'target_reached' | 'searches_exhausted' | 'review_limit' | 'provider_error' | 'deduplicated';
   exclusions?: { unavailable: number; postingAge: number; unknownDate: number; requirements: number; belowScore: number; unreadable: number };
 };
 export type Resume = { id: string; name: string; text: string; createdAt: string; originalText?: string; originalName?: string; templateAvailable?: boolean; revision?: number; updatedAt?: string };

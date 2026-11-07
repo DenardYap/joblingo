@@ -66,7 +66,7 @@ export function App() {
     if (sort === 'headcount') return (employeeCount(data.companyFacts?.[b.id]?.headcount)?.min ?? -1) - (employeeCount(data.companyFacts?.[a.id]?.headcount)?.min ?? -1);
     return sort === 'score' ? (b.matchCurrent === false ? -1 : b.score) - (a.matchCurrent === false ? -1 : a.score) : b.lastFoundAt.localeCompare(a.lastFoundAt);
   });
-  const selectedJob = data.jobs.find((job) => job.id === selected);
+  const selectedJob = data.jobs.find((job) => job.id === selected || (selected && job.relatedJobIds?.includes(selected)));
   const exampleMode = data.jobs.length > 0 && data.jobs.every((job) => job.example);
   const outdatedScores = data.jobs.filter(job => !job.example && listingState(job) === 'Open' && job.matchCurrent === false && withinPostingWindow(job.postedAt,data.preferences.maxPostingAgeDays)).length;
   return <div className="app-shell"><a className="skip-link" href="#main">Skip to content</a>

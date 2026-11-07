@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { type Job, type Run } from '../../shared/workspace.js';
+import { preferenceScore, type Job, type Run } from '../../shared/workspace.js';
 import { claim, finishRun, get, list, patch, preferences, put, release, renew } from '../store.js';
 import { aiReady, safeUrl, searchWeb } from '../ai.js';
 import { safeError } from '../errors.js';
@@ -10,6 +10,8 @@ import { hasNamedEmployer } from '../../shared/company-identity.js';
 import { compareRecentJobs, withinPostingWindow } from '../../shared/job-recency.js';
 import { assessJob, calculateScore, matchingFingerprint, matchingResume, resumeSearchTerms } from './matching.js';
 import { canonicalJobUrl, discoveryPlan, discoverUntilTarget } from './discovery.js';
+import { deduplicateJobs, mergeJobCopies, sameJob } from '../../shared/job-deduplication.js';
+import { discoverWithAgent } from './agent-discovery.js';
 
 export function searchReady() { return aiReady() && Boolean(process.env.EXA_API_KEY); }
 export function localClock(date: Date, timezone: string) {
@@ -54,14 +56,24 @@ export async function startRun(trigger: Run['trigger'], background = true): Prom
         const fingerprint = matchingFingerprint(config, resume);
         const stale = previousJobs.filter((job) => job.url && withinPostingWindow(job.postedAt,config.maxPostingAgeDays,searchTime) && job.matchContext?.profileFingerprint !== fingerprint)
           .map((job) => ({title:job.title,url:job.url!}));
+        const latest=[...runs].sort((a,b)=>b.startedAt.localeCompare(a.startedAt))[0];
+        const sameDayAttempt=latest && latest.status!=='Running' && latest.found>0 && localClock(new Date(latest.startedAt),config.timezone).day===clock.day;
+        const retained=sameDayAttempt ? deduplicateJobs(previousJobs.filter(job=>job.url && config.sources.includes(source(job.url) as typeof config.sources[number]) && job.availability==='Open' && job.eligible && job.sponsorship!=='No' && withinPostingWindow(job.postedAt,config.maxPostingAgeDays,searchTime) && job.matchContext?.profileFingerprint===fingerprint)
+          .map(job=>({...job,...preferenceScore(job.baseScore??job.score,config.preferPublicCompanies,job.companyListing)})).filter(job=>job.score>=config.minScore)).sort((a,b)=>compareRecentJobs(a,b,config.maxPostingAgeDays,searchTime)).slice(0,config.topCount-1) : [];
+        await patch('runs',id,{retained:retained.length});
         const assessed: Job[] = [];
         const exclusions: NonNullable<Run['exclusions']> = { unavailable: 0, postingAge: 0, unknownDate: 0, requirements: 0, belowScore: 0, unreadable: 0 };
         const excludedCount = () => Object.values(exclusions).reduce((total,count) => total + count, 0);
         const discovery = await discoverUntilTarget<Job>({
           target: config.topCount, maxReviewed: Math.min(600,Math.max(150,config.topCount*12)),
-          initial: stale, plan: discoveryPlan(config,searchTerms),
+          sameMatch: sameJob, mergeMatches: mergeJobCopies,
+          initial: stale, retained:retained.map(job=>({candidate:{title:job.title,url:job.url!},match:job})), plan: discoveryPlan(config,searchTerms),
           key: candidate => safeUrl(candidate.url) && config.sources.includes(source(candidate.url) as typeof config.sources[number]) ? canonicalJobUrl(candidate.url) : null,
-          search: (query,count) => searchWeb(query.query,count,objective.slice(0,4096),publicationWindow(query.days)),
+          search: async (query,count) => {
+            if(!query.agent)return searchWeb(query.query,count,objective.slice(0,4096),publicationWindow(query.days));
+            try { return await discoverWithAgent(id,config,retained); }
+            catch(error) { await patch('discovery-agents',id,{error:safeError(error)});return []; }
+          },
           progress: async ({matched:_matched,...stats},matches) => {
             if (!await renew(id)) throw new Error('Search was interrupted. Run again to retry.');
             const shortlist=[...matches].sort((a,b)=>compareRecentJobs(a,b,config.maxPostingAgeDays,searchTime)).slice(0,config.topCount);

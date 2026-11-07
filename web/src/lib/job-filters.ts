@@ -81,7 +81,7 @@ export function matchesFilters(job: Job, facts: CompanyFacts | undefined, filter
     && (!filters.locations.length || locationKeys(job).some(location => filters.locations.includes(location)))
     && includes(filters.companyTypes, job.companyListing?.status ?? 'Unknown')
     && includes(filters.sponsorship, job.sponsorship)
-    && includes(filters.sources, job.source)
+    && (!filters.sources.length || [job.source,...(job.listings ?? []).map(item=>item.source)].some(source=>filters.sources.includes(source)))
     && includes(filters.statuses, job.status)
     && includes(filters.workplaces, job.workplace)
     && (!scoreActive(filters) || job.matchCurrent !== false)

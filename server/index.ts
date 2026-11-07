@@ -23,6 +23,10 @@ import { database } from './store.js';
 import { WORD_LAYOUT_VERSION } from './pdf-template.js';
 import { workspaceId } from './workspace-context.js';
 import { matchingFingerprint, matchingResume } from './search/matching.js';
+import { deduplicateJobs } from '../shared/job-deduplication.js';
+import { groupedJob, updateJobTracking } from './job-groups.js';
+import { distinctRun } from '../shared/search-runs.js';
+import { normalizedEmployerName } from '../shared/company-identity.js';
 
 validateProduction();
 const app = express();
@@ -47,20 +51,25 @@ app.post('/api/google/disconnect',googleDisconnect);
 app.get('/api/workspace', async (_req, res) => {
   await reconcileRuns();
   const stored = await list<Job>('jobs');
-  const real = await Promise.all(stored.filter((job) => !job.example).map(scoredJob));
-  const runs = (await list<Run>('runs')).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const real = deduplicateJobs(await Promise.all(stored.filter((job) => !job.example).map(scoredJob)));
+  const runs = (await list<Run>('runs')).map(run=>distinctRun(run,real)).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const jobs = real.length || runs.some((run) => run.status === 'Completed') ? real : examples().map((job) => stored.find((item) => item.id === job.id) ?? job);
   const companyFacts = Object.fromEntries((await list<Research>('research')).map(record => [record.jobId, { headcount: record.data?.company.headcount ?? null, researchStatus: record.status }]));
+  for (const job of jobs) {
+    const available = [job.id,...(job.relatedJobIds ?? [])].filter(id=>normalizedEmployerName(stored.find(item=>item.id===id)?.company ?? '')===normalizedEmployerName(job.company)).map(id => companyFacts[id]).filter(Boolean);
+    companyFacts[job.id] = available.find(fact => fact?.headcount) ?? available[0] ?? {headcount:null,researchStatus:'unresolved'};
+  }
   res.json({ account:{id:res.locals.account.id,email:res.locals.account.email,name:res.locals.account.name}, preferences: await preferences(), jobs, companyFacts, runs, resumes: await list<Resume>('resumes'), drafts: await list<Draft>('drafts'), capabilities: { search: searchReady(), ai: aiReady(), missing: ['EXA_API_KEY', 'OPENAI_API_KEY', 'OPENAI_MODEL'].filter((key) => !process.env[key]), googleConfigured: googleConfigured(), googleConnected: await googleConnected(), storage: process.env.DATABASE_URL ? 'PostgreSQL' : 'Local PostgreSQL' } });
 });
 app.put('/api/preferences', async (req, res) => { const value = preferencesSchema.parse(req.body); if (value.enabled && !searchReady()) throw new Error('Connect the search providers before enabling daily searches.'); if(value.matchingResumeId && !await get('resumes',value.matchingResumeId)) throw new Error('Choose an available matching resume.'); await put('settings', 'main', value); res.json(value); });
 app.post('/api/runs', async (_req, res) => { const run = await startRun('Manual'); res.status(202).json(run); });
-app.post('/api/jobs/:id/verify', async (req,res) => { const job=await jobById(req.params.id); if(!job) { res.status(404).json({error:'Job not found.'});return; } res.json(await scoredJob(await verifyJob(job))); });
+app.post('/api/jobs/:id/verify', async (req,res) => { const job=await jobById(req.params.id); if(!job) { res.status(404).json({error:'Job not found.'});return; } const checked=await verifyJob(job); res.json(await scoredJob(await groupedJob(job.id) ?? checked)); });
 app.post('/api/jobs/:id/report-closed', async (req,res) => { const job=await get<Job>('jobs',req.params.id); if(!job) {res.status(404).json({error:'Job not found.'});return;} res.json(await scoredJob((await patch<Job>('jobs',job.id,{availability:'Closed',availabilityReason:'Marked closed after reviewing the source listing.',checkedAt:new Date().toISOString(),open:false}))!)); });
 const logoCache=new Map<string,{body:Buffer;type:string;expires:number}>();
 app.get('/api/jobs/:id/logo',async(req,res)=>{
   const job=await jobById(req.params.id); if(!job || job.example){res.sendStatus(404);return;}
-  const logoUrl=job.companyLogoVersion===LOGO_VERSION && job.companyLogoUrl ? job.companyLogoUrl : await findCompanyLogo(job.company,job);
+  const group=await groupedJob(job.id) ?? job;
+  const logoUrl=group.companyLogoVersion===LOGO_VERSION && group.companyLogoUrl ? group.companyLogoUrl : await findCompanyLogo(job.company,job);
   if(job.companyLogoVersion!==LOGO_VERSION || job.companyLogoUrl!==logoUrl) await patch('jobs',job.id,{companyLogoUrl:logoUrl,companyLogoVersion:LOGO_VERSION});
   if(!logoUrl){res.set('Cache-Control','private, max-age=300').sendStatus(404);return;}
   try {
@@ -74,7 +83,7 @@ app.get('/api/jobs/:id/logo',async(req,res)=>{
     res.set('Content-Type',logo.type).set('Content-Security-Policy',"default-src 'none'; sandbox").set('Cache-Control','private, max-age=86400').send(logo.body);
   } catch {res.sendStatus(404);}
 });
-app.patch('/api/jobs/:id', async (req, res) => { const changes = jobPatchSchema.parse(req.body); const job = await jobById(req.params.id); if (!job) { res.status(404).json({ error: 'Job not found.' }); return; } if (!await get('jobs', job.id)) await put('jobs', job.id, job); res.json(await scoredJob((await patch<Job>('jobs', job.id, changes))!)); });
+app.patch('/api/jobs/:id', async (req, res) => { const changes = jobPatchSchema.parse(req.body); const job = await jobById(req.params.id); if (!job) { res.status(404).json({ error: 'Job not found.' }); return; } if (!await get('jobs', job.id)) await put('jobs', job.id, job); res.json(await scoredJob((await updateJobTracking(job.id,changes))!)); });
 app.post('/api/resumes', upload.single('resume'), async (req, res) => { if (!req.file) throw new Error('Choose a resume file.'); const resume = await readResume(req.file); await put('resumes', resume.id, resume); await storeResumeTemplate(resume,req.file); res.status(201).json(await get('resumes',resume.id)); });
 app.get('/api/resumes/:id/original',async(req,res)=>{const resume=await get<Resume>('resumes',req.params.id);if(!resume){res.sendStatus(404);return;}const file=await originalResume(resume);res.type(file.type).set('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(file.name)}`).send(file.body);});
 app.post('/api/resumes/:id/restore',async(req,res)=>{
@@ -109,7 +118,12 @@ app.get('/api/drafts/:id/pdf', async (req, res) => { const draft=await get<Draft
 app.get('/api/drafts/:id/docx',async(req,res)=>{const draft=await get<Draft>('drafts',req.params.id);if(!draft){res.sendStatus(404);return;}res.set('Content-Type','application/vnd.openxmlformats-officedocument.wordprocessingml.document').set('Content-Disposition','attachment; filename="resume.docx"').send(await draftDocx(draft));});
 app.post('/api/drafts/:id/google', async (req, res) => { const draft = await get<Draft>('drafts', req.params.id); if (!draft) throw new Error('Draft not found.'); const url = await exportGoogle(draft); const saved=await(await database()).query("UPDATE workspace_records SET data=data || $3::jsonb WHERE workspace_id=$1 AND kind='drafts' AND id=$2 AND COALESCE((data->>'revision')::integer,1)=$4 RETURNING id",[workspaceId(),draft.id,JSON.stringify({googleUrl:url,googleLayoutVersion:WORD_LAYOUT_VERSION}),draft.revision??1]);if(!saved.rows.length)throw new Error('The draft changed while Google Docs was opening. Reopen the latest version.');res.json({url}); });
 app.post('/api/jobs/:id/research', async (req, res) => { const job = await jobById(req.params.id); if (!job) throw new Error('Job not found.'); res.status(202).json(await startResearch(job)); });
-app.get('/api/jobs/:id/research', async (req, res) => res.json(await readResearch(req.params.id)));
+app.get('/api/jobs/:id/research', async (req, res) => {
+  const job=await groupedJob(req.params.id);
+  const records=await Promise.all([req.params.id,...(job?.relatedJobIds ?? [])].map(id=>get<Research>('research',id)));
+  const completed=records.find(record=>record?.status==='completed' && record.data?.employerName && job && normalizedEmployerName(record.data.employerName)===normalizedEmployerName(job.company));
+  res.json(await readResearch(completed?.jobId ?? job?.id ?? req.params.id));
+});
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint not found.' }));
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const message = error instanceof z.ZodError ? error.issues[0]?.message : safeError(error);
