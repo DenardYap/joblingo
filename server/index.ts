@@ -27,6 +27,7 @@ import { deduplicateJobs } from '../shared/job-deduplication.js';
 import { groupedJob, updateJobTracking } from './job-groups.js';
 import { distinctRun } from '../shared/search-runs.js';
 import { normalizedEmployerName } from '../shared/company-identity.js';
+import { jobAuthorizationRestrictions } from '../shared/work-authorization.js';
 
 validateProduction();
 const app = express();
@@ -36,7 +37,7 @@ const jobById = async (id: string) => await get<Job>('jobs', id) ?? examples().f
 const scoredJob = async (job:Job):Promise<Job> => {
   if(job.example) return job;
   const config=await preferences();
-  return {...job,baseScore:job.baseScore ?? job.score,...preferenceScore(job.baseScore ?? job.score,config.preferPublicCompanies,job.companyListing),matchCurrent:job.matchContext?.profileFingerprint === matchingFingerprint(config,await matchingResume(config))};
+  return {...job,authorizationRestrictions:jobAuthorizationRestrictions(job),baseScore:job.baseScore ?? job.score,...preferenceScore(job.baseScore ?? job.score,config.preferPublicCompanies,job.companyListing),matchCurrent:job.matchContext?.profileFingerprint === matchingFingerprint(config,await matchingResume(config))};
 };
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.post('/api/login', login);

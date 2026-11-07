@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { searchBriefSchema } from './contracts';
+import type { AuthorizationRestriction } from './work-authorization';
 
 export const statuses = ['Not started', 'Applied', 'Pending', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'] as const;
 export const preferencesSchema = searchBriefSchema.extend({
@@ -39,6 +40,7 @@ export type Job = ExtractedJob & {
   id: string; source: string; url: string | null; foundAt: string; lastFoundAt: string; foundOn: string[];
   saved: boolean; status: typeof statuses[number]; notes: string; appliedAt: string | null; example: boolean;
   trackingUpdatedAt?: string; relatedJobIds?: string[]; listings?: {id:string;url:string;source:string}[];
+  authorizationRestrictions?: AuthorizationRestriction[];
   applicationIdentity?: {board:string;id:string};
   availability?: 'Open' | 'Closed' | 'Unverified'; availabilityReason?: string; checkedAt?: string;
   companyLogoUrl?: string | null; companyLogoVersion?: string; companyWebsite?: string | null; postedAtSource?: string | null;

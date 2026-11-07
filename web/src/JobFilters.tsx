@@ -6,7 +6,7 @@ import { localDate } from './lib/api';
 import { activeFilterCount, defaultFilters, locationKeys, rangeActive, scoreActive, sizeBands, type JobFilters } from './lib/job-filters';
 
 type Options = { value: string; label: string }[];
-type MultiKey = 'availability' | 'locations' | 'companyTypes' | 'sizes' | 'sponsorship' | 'sources' | 'statuses' | 'workplaces';
+type MultiKey = 'availability' | 'eligibility' | 'locations' | 'companyTypes' | 'sizes' | 'sponsorship' | 'sources' | 'statuses' | 'workplaces';
 const options = (values: readonly string[]): Options => values.map(value => ({ value, label: value }));
 const companyOptions = options(['Public', 'Private', 'Unknown']);
 type Props = {
@@ -22,6 +22,7 @@ export function JobToolbar({ jobs, filters, onChange, query, onQuery, saved, onS
   const changeMulti = (key: MultiKey, values: string[]) => onChange({ ...filters, [key]: values });
   const groups: { key: MultiKey; label: string; icon: IconName; options: Options }[] = [
     { key: 'availability', label: 'Listing', icon: 'check', options: [{ value: 'Open', label: 'Open' }, { value: 'Unverified', label: 'Needs checking' }, { value: 'Closed', label: 'Closed' }] },
+    { key: 'eligibility', label: 'Eligibility', icon: 'visa', options: [{value:'Qualified',label:'No known restriction'},{value:'Needs review',label:'Authorization needs review'},{value:'Excluded',label:'Does not meet requirements'}] },
     { key: 'statuses', label: 'Application status', icon: 'briefcase', options: options(statuses) },
     { key: 'locations', label: 'Location', icon: 'location', options: locations },
     { key: 'workplaces', label: 'Work setup', icon: 'building', options: options(['Remote', 'Hybrid', 'On-site', 'Unknown']) },

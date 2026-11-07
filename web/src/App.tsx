@@ -11,6 +11,7 @@ import { JobToolbar } from './JobFilters';
 import { defaultFilters, employeeCount, matchesFilters } from './lib/job-filters';
 import { compareRecentJobs, withinPostingWindow } from '../../shared/job-recency';
 import { runCounts, runExplanation, runExclusions, runNotice, runOutcome } from '../../shared/search-runs';
+import { eligibilityState } from '../../shared/work-authorization';
 
 type View = 'jobs' | 'saved';
 export function App() {
@@ -86,7 +87,7 @@ export function App() {
             <td className="job-headcount" title={data.companyFacts?.[job.id]?.headcount ?? 'No employee count has been confirmed.'}>{employeeCount(data.companyFacts?.[job.id]?.headcount)?.label ?? (data.companyFacts?.[job.id]?.headcount ? 'See details' : data.companyFacts?.[job.id] && !['completed', 'failed', 'cancelled', 'unresolved'].includes(data.companyFacts?.[job.id]?.researchStatus ?? 'completed') ? 'Researching…' : 'Unknown')}</td>
             <td className="job-location"><span className="cell-clamp" title={job.location ?? undefined}>{job.location ?? 'Not listed'}</span>{job.workplace !== 'Unknown' && <small className="cell-clamp" title={job.officeDays ?? undefined}>{job.workplace}{job.officeDays ? ` · ${job.officeDays}` : ''}</small>}</td>
             <td className="job-salary"><span className="cell-clamp" title={job.salary ?? undefined}>{job.salary ?? 'Not listed'}</span></td>
-            <td className="job-visa"><span className={job.sponsorship === 'Unknown' ? 'muted' : ''}>{job.sponsorship}</span></td>
+            <td className="job-visa"><span className={job.sponsorship === 'Unknown' ? 'muted' : ''}>{job.sponsorship}</span>{eligibilityState(job)==='Needs review' && <small>Authorization needs review</small>}</td>
             <td className="job-status" data-row-control><Select.Root size="1" value={job.status} onValueChange={(value) => void update(job.id, { status: value as Job['status'] }).catch((error: Error) => setNotice(error.message))}><Select.Trigger variant="ghost" color="gray" aria-label={`Status for ${job.title} at ${job.company}`} /><Select.Content position="popper">{statuses.map((value) => <Select.Item key={value} value={value}>{value}</Select.Item>)}</Select.Content></Select.Root></td>
             <td className="job-save" data-row-control><button className={`icon-button ${job.saved ? 'saved' : ''}`} aria-label={`${job.saved ? 'Unsave' : 'Save'} ${job.title} at ${job.company}`} aria-pressed={job.saved} onClick={() => void update(job.id, { saved: !job.saved }).catch((error: Error) => setNotice(error.message))}><Icon name="bookmark" size={18} filled={job.saved} /></button></td>
           </tr>)}</tbody></table></div>}{filtered.length > limit && <button className="button secondary load-more" onClick={() => setLimit(limit + 100)}>Show more jobs</button>}

@@ -21,6 +21,8 @@ The repository-installed `build-with-exa` skill is the source of truth for Exa r
 
 The app does not currently give the ranking model a web-search tool: Exa retrieval happens in the deterministic server pipeline. If tool calling is introduced, use the Exa SDK helper or require both `query` and `objective`, including the skill's prescribed objective description in the LLM/tool instructions.
 
+Work-authorization conditions are independent of visa sponsorship and fit. Deterministic checks of full live text and grounded model quotes detect mandatory citizenship/permanent-resident, export-control, and security-clearance conditions. ITAR alternatives and authorization exceptions stay in the quoted evidence; the app never infers the applicant's citizenship or eligibility. These roles require review and cannot fill a new shortlist or retained-match quota. Ordinary work authorization, optional ITAR experience, EEO statements, and application questions do not establish a restriction. Greenhouse's full decoded job-feed content is used when available. Rechecks update saved restriction evidence; default table filters hide both review-needed and ineligible jobs, while Eligibility filters retain access to their tracking and drafts. Duplicate consolidation preserves restrictions across source copies.
+
 Search relevance and fit scores cannot guarantee availability or interview success. Coverage is limited to public content Exa can retrieve. Found dates and employer-posted dates are distinct. A successful zero-match run remains a real empty state; fictional previews only appear before any successful discovery.
 
 ## Scheduling

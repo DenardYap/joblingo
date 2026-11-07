@@ -7,6 +7,7 @@ import { patch } from './store.js';
 import { LOGO_VERSION } from './company-logo.js';
 import type { Job } from '../shared/workspace.js';
 import { applicationIdentity } from '../shared/job-deduplication.js';
+import { groundedAuthorizationRestrictions, jobAuthorizationRestrictions } from '../shared/work-authorization.js';
 
 type RecordData = Record<string, any>;
 export type ListingCheck = { availability: 'Open' | 'Closed' | 'Unverified'; availabilityReason: string; checkedAt: string; postedAt: string | null; postedAtSource: string | null; companyLogoUrl: string | null; companyWebsite: string | null; text: string; applicationIdentity?: Job['applicationIdentity'] };
@@ -68,6 +69,11 @@ export async function checkListing(url: string, title?: string): Promise<Listing
             if(response.status===200) {
               const listing=JSON.parse(response.body.toString('utf8'));
               if(typeof listing.title==='string' && matchesTitle(listing.title,title)) {
+                if (typeof listing.content === 'string') {
+                  const decoded=load(listing.content).text();
+                  const description=load(decoded).text().replace(/\s+/g,' ').trim();
+                  if(description) result.text=description;
+                }
                 if(typeof listing.application_deadline==='string' && Date.parse(listing.application_deadline)<Date.now()) return closed('The employer’s application deadline has passed.');
                 result.postedAt=postingDate(listing.first_published) ?? meta.date;
                 result.postedAtSource=result.postedAt ? url:null;
@@ -128,7 +134,8 @@ export function verifyJob(job: Job): Promise<Job> {
     fields.companyWebsite=check.companyWebsite ?? job.companyWebsite ?? null;
     if (job.availability === 'Closed' && check.availability === 'Unverified') { fields.availability='Closed'; fields.availabilityReason=job.availabilityReason ?? 'Previously confirmed closed.'; }
     const logo = job.companyLogoVersion === LOGO_VERSION ? job.companyLogoUrl : null;
-    return (await patch<Job>('jobs',job.id,{...fields,companyLogoUrl:logo,companyLogoVersion:LOGO_VERSION,open:fields.availability==='Open'}))!;
+    const authorizationRestrictions=check.text.trim() ? groundedAuthorizationRestrictions(check.text,job.authorizationRestrictions) : jobAuthorizationRestrictions(job);
+    return (await patch<Job>('jobs',job.id,{...fields,authorizationRestrictions,companyLogoUrl:logo,companyLogoVersion:LOGO_VERSION,open:fields.availability==='Open'}))!;
   })().finally(()=>inFlight.delete(key));
   inFlight.set(key,promise); return promise;
 }

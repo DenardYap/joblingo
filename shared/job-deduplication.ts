@@ -1,5 +1,6 @@
 import { hasNamedEmployer, normalizedEmployerName } from './company-identity.js';
 import type { Job } from './workspace.js';
+import { jobAuthorizationRestrictions } from './work-authorization.js';
 
 const words = (value: string) => value.toLowerCase().normalize('NFKC').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 function role(job: Job) {
@@ -64,7 +65,7 @@ export function mergeJobCopies(copies: Job[]): Job {
   const relatedJobIds = [...new Set(copies.flatMap(job => [job.id, ...(job.relatedJobIds ?? [])]))].sort();
   const listings = [...new Map(copies.flatMap(job => [...(job.listings ?? []), ...(job.url ? [{id:job.id,url:job.url,source:job.source}] : [])]).map(item => [item.url,item])).values()];
   const posted = copies.map(job => job.postedAt).filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value)))).sort();
-  return { ...primary, applicationIdentity: primary.applicationIdentity ?? applicationIdentity(primary.url) ?? ordered.find(job=>job.applicationIdentity)?.applicationIdentity, companyLogoUrl: logo?.companyLogoUrl ?? primary.companyLogoUrl, relatedJobIds, listings, status,
+  return { ...primary, authorizationRestrictions:[...new Map(copies.flatMap(jobAuthorizationRestrictions).map(item=>[`${item.kind}:${item.evidence}`,item])).values()], applicationIdentity: primary.applicationIdentity ?? applicationIdentity(primary.url) ?? ordered.find(job=>job.applicationIdentity)?.applicationIdentity, companyLogoUrl: logo?.companyLogoUrl ?? primary.companyLogoUrl, relatedJobIds, listings, status,
     saved: tracked?.saved ?? copies.some(job => job.saved),
     notes: tracked?.notes ?? [...new Set(copies.map(job => job.notes.trim()).filter(Boolean))].join('\n\n'),
     appliedAt: copies.map(job => job.appliedAt).filter((value): value is string => Boolean(value)).sort()[0] ?? null,

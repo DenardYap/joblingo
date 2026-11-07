@@ -12,6 +12,7 @@ import { assessJob, calculateScore, matchingFingerprint, matchingResume, resumeS
 import { canonicalJobUrl, discoveryPlan, discoverUntilTarget } from './discovery.js';
 import { deduplicateJobs, mergeJobCopies, sameJob } from '../../shared/job-deduplication.js';
 import { discoverWithAgent } from './agent-discovery.js';
+import { detectAuthorizationRestrictions, eligibilityState } from '../../shared/work-authorization.js';
 
 export function searchReady() { return aiReady() && Boolean(process.env.EXA_API_KEY); }
 export function localClock(date: Date, timezone: string) {
@@ -50,7 +51,7 @@ export async function startRun(trigger: Run['trigger'], background = true): Prom
         const searchTime = Date.now();
         const publicationWindow = (days: number) => ({ startPublishedDate: new Date(searchTime - days * 86400000).toISOString(), endPublishedDate: new Date(searchTime).toISOString() });
         const publicPreference=config.preferPublicCompanies ? 'Prioritize publicly traded employers as a soft preference; private companies remain eligible.' : '';
-        const objective=`Find distinct candidate postings toward ${config.topCount} qualifying job matches. Prefer the past 24 hours; the past ${config.maxPostingAgeDays} days is the maximum window. ${publicPreference} Prioritize direct employer postings and individual listings from ${config.sources.join(', ')}. Exclude aggregate pages, closed roles and older postings. Use original posting dates, never crawl or update dates. Requirements: ${config.hardRequirements}`;
+        const objective=`Find distinct candidate postings toward ${config.topCount} qualifying job matches. Prefer the past 24 hours; the past ${config.maxPostingAgeDays} days is the maximum window. ${publicPreference} Prioritize direct employer postings and individual listings from ${config.sources.join(', ')}. Exclude aggregate pages, closed roles and older postings. Exclude mandatory citizenship, U.S.-person, export-control authorization and security-clearance restrictions: candidate eligibility is unconfirmed. Use original posting dates, never crawl or update dates. Requirements: ${config.hardRequirements}`;
         // Refresh older saved matches only after fresh discovery has had its turn,
         // so a changed resume cannot fill the whole quota with existing history.
         const fingerprint = matchingFingerprint(config, resume);
@@ -58,7 +59,7 @@ export async function startRun(trigger: Run['trigger'], background = true): Prom
           .map((job) => ({title:job.title,url:job.url!}));
         const latest=[...runs].sort((a,b)=>b.startedAt.localeCompare(a.startedAt))[0];
         const sameDayAttempt=latest && latest.status!=='Running' && latest.found>0 && localClock(new Date(latest.startedAt),config.timezone).day===clock.day;
-        const retained=sameDayAttempt ? deduplicateJobs(previousJobs.filter(job=>job.url && config.sources.includes(source(job.url) as typeof config.sources[number]) && job.availability==='Open' && job.eligible && job.sponsorship!=='No' && withinPostingWindow(job.postedAt,config.maxPostingAgeDays,searchTime) && job.matchContext?.profileFingerprint===fingerprint)
+        const retained=sameDayAttempt ? deduplicateJobs(previousJobs.filter(job=>job.url && config.sources.includes(source(job.url) as typeof config.sources[number]) && job.availability==='Open' && eligibilityState(job)==='Qualified' && withinPostingWindow(job.postedAt,config.maxPostingAgeDays,searchTime) && job.matchContext?.profileFingerprint===fingerprint)
           .map(job=>({...job,...preferenceScore(job.baseScore??job.score,config.preferPublicCompanies,job.companyListing)})).filter(job=>job.score>=config.minScore)).sort((a,b)=>compareRecentJobs(a,b,config.maxPostingAgeDays,searchTime)).slice(0,config.topCount-1) : [];
         await patch('runs',id,{retained:retained.length});
         const assessed: Job[] = [];
@@ -87,12 +88,13 @@ export async function startRun(trigger: Run['trigger'], background = true): Prom
             if (!check.postedAt) { exclusions.unknownDate++; return null; }
             if (!withinPostingWindow(check.postedAt,config.maxPostingAgeDays,searchTime)) { exclusions.postingAge++; return null; }
             if (!check.text.trim()) { exclusions.unreadable++; return null; }
+            if (detectAuthorizationRestrictions(check.text).length) { exclusions.requirements++; return null; }
             const assessment = await assessJob(config,resume,{...candidate,text:check.text});
             const {components:_components,...parsed}=assessment;
             const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
             const evidenceVerified = parsed.sponsorshipEvidence && normalize(check.text).includes(normalize(parsed.sponsorshipEvidence));
             if (!evidenceVerified && parsed.sponsorship === 'Yes') { parsed.sponsorship = 'Unknown'; parsed.sponsorshipEvidence = null; parsed.gaps.push('Confirm visa sponsorship with the recruiter.'); }
-            if (!parsed.isJob || !parsed.open || !parsed.eligible || parsed.sponsorship === 'No') { exclusions.requirements++; return null; }
+            if (!parsed.isJob || !parsed.open || !parsed.eligible || parsed.sponsorship === 'No' || parsed.authorizationRestrictions.length) { exclusions.requirements++; return null; }
             const url = canonicalJobUrl(candidate.url);
             const jobId = createHash('sha256').update(url).digest('hex').slice(0, 24);
             const existing = await get<Job>('jobs', jobId);

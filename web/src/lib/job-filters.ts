@@ -1,14 +1,15 @@
 import { listingState, type Job, type CompanyFacts } from '../../../shared/workspace';
 import { localDate } from './api';
+import { eligibilityState } from '../../../shared/work-authorization';
 
 export type DateRange = { from: string; to: string };
 export type JobFilters = {
-  availability: string[]; locations: string[]; companyTypes: string[]; sizes: string[];
+  availability: string[]; eligibility: string[]; locations: string[]; companyTypes: string[]; sizes: string[];
   sponsorship: string[]; sources: string[]; statuses: string[]; workplaces: string[];
   score: { min: string; max: string }; posted: DateRange; found: DateRange;
 };
 export const defaultFilters = (): JobFilters => ({
-  availability: ['Open'], locations: [], companyTypes: [], sizes: [], sponsorship: [],
+  availability: ['Open'], eligibility: ['Qualified'], locations: [], companyTypes: [], sizes: [], sponsorship: [],
   sources: [], statuses: [], workplaces: [], score: { min: '', max: '' },
   posted: { from: '', to: '' }, found: { from: '', to: '' },
 });
@@ -58,7 +59,7 @@ const includes = (values: string[], value: string) => !values.length || values.i
 export const rangeActive = (range: DateRange) => Boolean(range.from || range.to);
 export const scoreActive = (filters: JobFilters) => Boolean(filters.score.min || filters.score.max);
 export function activeFilterCount(filters: JobFilters): number {
-  return ['availability', 'locations', 'companyTypes', 'sizes', 'sponsorship', 'sources', 'statuses', 'workplaces']
+  return ['availability', 'eligibility', 'locations', 'companyTypes', 'sizes', 'sponsorship', 'sources', 'statuses', 'workplaces']
     .reduce((count, key) => count + Number((filters[key as keyof JobFilters] as string[]).length > 0), 0)
     + Number(scoreActive(filters)) + Number(rangeActive(filters.posted)) + Number(rangeActive(filters.found));
 }
@@ -78,6 +79,7 @@ export function matchesFilters(job: Job, facts: CompanyFacts | undefined, filter
   });
   return `${job.title} ${job.company} ${job.location ?? ''}`.toLowerCase().includes(query.trim().toLowerCase())
     && includes(filters.availability, listingState(job))
+    && includes(filters.eligibility, eligibilityState(job))
     && (!filters.locations.length || locationKeys(job).some(location => filters.locations.includes(location)))
     && includes(filters.companyTypes, job.companyListing?.status ?? 'Unknown')
     && includes(filters.sponsorship, job.sponsorship)

@@ -195,6 +195,11 @@ input[type=checkbox] { accent-color: var(--blue); width: 16px; height: 16px; }
 .availability-notice strong { font-size: 13px; font-weight: 550; }
 .availability-notice p, .availability-notice small { font-size: 11px; line-height: 1.7; color: var(--muted); margin-top: 4px; }
 .availability-notice.closed strong { color: #a04949; }
+.authorization-notice { background: var(--subtle); padding: 16px; margin-bottom: 24px; border-radius: 12px; }
+.authorization-notice h3 { font-size: 14px; margin-bottom: 8px; }
+.authorization-notice p, .authorization-notice strong, .authorization-notice blockquote { font-size: 12px; line-height: 1.7; }
+.authorization-notice p { color: var(--muted); margin-bottom: 12px; }
+.authorization-notice blockquote { margin: 4px 0 0; }
 @media (max-width: 760px) {
   .jobs-table { min-width: 0; table-layout: auto; }.job-row { height: auto; min-height: 240px; }
   .job-role { width: auto; }.role-identity { align-items: flex-start; gap: 10px; }.role-copy small { white-space: normal; }
