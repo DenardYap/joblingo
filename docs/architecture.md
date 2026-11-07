@@ -1,0 +1,108 @@
+# Architecture
+
+## Product and storage
+
+Each Google subject has a private workspace. React/Vite renders a jobs table with settings in a dialog. The server validates public contracts with Zod. PostgreSQL stores documents in `workspace_records`, keyed by kind and ID, and a separate `search_lease` row coordinates manual and scheduled searches. Local development uses PGlite with the same SQL and persistent storage under `.local/postgres`; Render uses a `pg` pool and managed PostgreSQL. Drizzle provides the reviewed schema and migrations.
+
+Preferences, job tracking, search runs, uploaded resume text, generated drafts, and research run IDs survive restarts. New discovery merges preserve bookmarks, notes, application status, application date, and original discovery time. Jobs are deduplicated by canonical URL; cross-site copies with different URLs may still appear. No application is submitted automatically.
+
+The client retries interrupted read requests briefly and handles empty or non-JSON error responses without exposing parser errors. Mutations are not automatically retried. If starting a search loses its response, the client checks persisted run history before deciding whether it failed to start.
+
+## Search pipeline
+
+The repository-installed `build-with-exa` skill is the source of truth for Exa request shapes.
+
+1. `/search` uses `type: auto`, `objective`, and `contents.highlights: true`. Discovery starts with past-24-hours queries, then the wider posting window and role/source variants. Public-company searches are included when preferred. Each request asks for 30–60 raw results based on the remaining target. A sparse response or rejected candidates triggers the next query; `numResults` is not a promise of that many results. The review budget is 12 times the target, bounded to 150–600 (360 for a target of 30). `startPublishedDate` and `endPublishedDate` enforce the requested window in Exa. Source preferences stay in query/objective phrasing rather than hard domain allowlists.
+2. Raw result URLs drive discovery. No synthesized output array is used to limit the candidate pool. Canonical duplicates are skipped across queries before review.
+3. Full live job text is fetched during availability verification because exclusions can be buried in the posting and resume tailoring needs a faithful description. The Exa `/contents` fallback uses `maxAgeHours: 0` for a live crawl; it is not a posting-date filter. Per-URL status and text are checked before assessment.
+4. Independent availability verification checks fresh HTTP pages, expiration notices, HTTP 404/410, expired-listing redirects, employer application forms, and Ashby/Greenhouse public feeds. A job description or an HTTP 200 response alone is insufficient. A live Exa crawl can assess a blocked/rendered page; a timeout or ambiguous result is Unverified. Only Open results enter the new shortlist. The previous active records are rechecked, and Open checks expire from the default list after 24 hours. Applying forces another live check before opening and marking Applied.
+5. The employer's verified posting date must fall within the configured window (seven days by default) before assessment; undated, future-dated and older listings cannot fill the quota. OpenAI Responses with structured output extracts and assesses postings in bounded batches of three. Web text is untrusted data. Unsupported facts remain unknown; an affirmative sponsorship claim must have an exact supporting excerpt. Explicit no-sponsorship roles are excluded. Hard requirements and minimum fit apply first; qualifying jobs from the last 24 hours rank ahead of the rest of the window, with fit and verified public-company preference breaking ties within each age group. The result limit then applies. Older saved records and application statuses remain in history; recommended table sorting uses the same age groups, with older/undated history below recent jobs.
+6. Discovery stops when enough jobs qualify, all planned queries are exhausted, the review budget is reached, or a provider fails. A run snapshots its target and posting window, and persists progress, exclusion reasons, and its stop reason. History distinguishes partial results from meeting the target. Verified matches are saved incrementally with progress so they survive provider failures and server restarts. Saved-history refreshes are a fallback after fresh search queries, never a replacement for discovery. The accepted jobs and run record commit atomically after each batch and at completion, guarded by the current database lease. Application tracking fields survive rediscovery.
+
+The app does not currently give the ranking model a web-search tool: Exa retrieval happens in the deterministic server pipeline. If tool calling is introduced, use the Exa SDK helper or require both `query` and `objective`, including the skill's prescribed objective description in the LLM/tool instructions.
+
+Search relevance and fit scores cannot guarantee availability or interview success. Coverage is limited to public content Exa can retrieve. Found dates and employer-posted dates are distinct. A successful zero-match run remains a real empty state; fictional previews only appear before any successful discovery.
+
+## Scheduling
+
+Both the manual API and cron dispatcher call the same runner. A five-minute PostgreSQL lease renews every 30 seconds and after each ranking batch. A lost lease prevents final writes. Workspace reads reconcile orphaned Running records after expiry so the UI can retry. Provider failures become actionable, sanitized messages.
+
+Daily dispatch compares wall-clock date/time using the saved IANA time zone. It runs after the selected time, once successfully per local day, with at most three scheduled attempts. A repeated fall-back hour does not trigger a duplicate successful daily run. A skipped spring-forward time runs at the first dispatch after the gap. Missed previous days are not backfilled. Local dispatch runs every minute; Render dispatch runs every 15 minutes in UTC. Render docs: https://render.com/docs/cronjobs
+
+## Research and resumes
+
+Company facts and public professional contacts use Exa Agent with explicit `effort: auto`, a structured schema, and a $1 per-run budget. The Exa run ID is persisted immediately. The server polls until completed/failed/cancelled and checks `stopReason`; reopening a job resumes inspection of the same run. Results expose source URLs including Exa grounding citations. Unknown private company financials are not estimated. Research is queued automatically in the same transaction that saves a shortlist. The server backfills existing real jobs, dispatches at most two provider runs at once, and polls them every ten seconds without requiring an open browser. A separate renewing database lease prevents the web service and cron worker from dispatching duplicate runs. Completed results are reused; transient polling failures retry after a minute using the same provider run ID. A failed run or interrupted create offers an explicit retry rather than automatically spending on another run. Queue and provider IDs survive restarts. The modal only reads persisted progress and results.
+
+Uploads retain original text and private DOCX bytes. Template tailoring edits only allowlisted work-experience and skills text nodes; all protected paragraphs and other ZIP parts are retained. Draft snapshots store their own template, DOCX and rendered PDF privately, and expose editable bullet blocks. LibreOffice renders in an isolated temporary profile, with macro execution disabled and external embedded objects rejected. Page count is checked before saving; up to two AI shortening passes may change bullet text, never layout. Manual edits use atomic revision checks and leave the old PDF intact on overflow. Google OAuth uses drive.file, PKCE, single-use database state and a browser-binding cookie; refresh tokens are AES-GCM encrypted under a key derived from SESSION_SECRET. Export uploads the saved original-format DOCX to Drive for native Google Docs conversion.
+
+## Deployment and checks
+
+Express serves the production React bundle and API from one origin. All startup requires APP_PASSWORD and a separate random SESSION_SECRET of at least 32 characters; production storage requires PostgreSQL. Signed sessions expire after 30 days both server-side and in the HttpOnly, SameSite=Strict cookie, with Secure enabled in production. Login attempts are rate-limited and logout clears the cookie. Password/secret changes invalidate old sessions. Private API responses are not cached; mutation origins are checked against the Render URL or configured custom origin. Resume uploads are bounded to 5 MB. Provider credentials are never returned to the client.
+
+The Blueprint is prepared for Render, but deployment, and remote database migration have not been performed. Google authorization is configured per owner using the local connection flow. The local workflow permits type checks, builds, code inspection, and manual UI checks. Automated tests remain deferred until an authorized push/PR under the user's preference.
+
+## Metadata and interaction
+
+Posting dates come from JobPosting `datePosted`, Ashby `publishedAt`, or Greenhouse `first_published`; updated/crawl/discovery timestamps are not substituted. Company logos come from employer metadata or the verified official website icon; Radix Avatar provides initials if unavailable. The server proxies logo bytes without provider credentials, constrains size/type, and validates public IP addresses on each redirect.
+
+Table body clicks open the detail modal; controls inside a row retain independent behavior. Keyboard users can activate the job-title button. The desktop rows have a consistent height and bounded text. The modal has a fixed viewport-bounded height, pinned header/tabs, and a scrolling content area that resets when changing tabs. The small-screen layout uses the same modal behavior with a bottom sheet.
+
+## Employer size and public-company preference
+
+Employee headcount is a dedicated Company-tab field even while research is pending. Research prioritizes dated official disclosures, then credible employee counts or employee ranges; follower/member counts are not substitutes. Field-level grounding is linked beside the headcount, and unknown values remain explicit.
+
+The enabled-by-default `preferPublicCompanies` preference influences discovery and scoring without excluding private employers. Discovery includes public-company queries in its adaptive search plan, then deduplicates the combined results. Base relevance keeps the role/location/experience/industry weights; the final score is rounded 95% base fit plus five points for verified public-company status. Turning the preference off restores base fit. Original base scores are preserved, including legacy records, so filtering and tracking updates do not double-apply the weighting. The minimum score applies after weighting; posting recency takes precedence when selecting the top X.
+
+A focused Exa search verifies the exact employer’s public/private status against a cited source, requiring exchange and ticker for a public bonus. It does not infer public status from size, familiarity, a public website, or a listed parent. Verified status is cached for seven days; unknown status is cached for an hour and earns no bonus. Existing completed research is enriched without rerunning its company/contact Agent run.
+
+Anonymous recruiter clients do not receive company enrichment or a public-company bonus. The ownership lookup checks the employer name, cited excerpt and ticker against retrieved evidence; cache entries are scoped to the employer and full job URL. Company/contact research must name the same employer or ends as unresolved. Existing anonymous listings with guessed metadata are repaired while preserving application tracking; rejected research is retained separately for audit. If a later posting identifies the employer, research can resume.
+
+The workspace response includes saved employee headcount research for the table, with original wording retained in tooltips and the Company tab. Table filters combine categories with AND and multiple choices within a category with OR. Reported employee ranges match overlapping size bands; missing or unparseable sizes remain Unknown. Posted and found date ranges are inclusive in the configured workspace timezone, and found ranges inspect every discovery date. Missing posted dates are excluded only when a posted range is active. Numeric fit ranges use current assessments. Search, common filters, saved jobs and sorting share one desktop toolbar; small screens expose the full filter panel below the search field.
+
+## Resume matching and score rubric
+
+Every manual or scheduled run snapshots the selected resume (`matchingResumeId`), defaulting to the latest upload when unset. A missing explicitly selected resume fails visibly rather than silently switching candidates. One resume is used throughout a run. OpenAI extracts at most six exact professional skill phrases for discovery; contact details and other personal identifiers are excluded from those Exa search terms. Full resume text is supplied only to OpenAI for matching and tailoring.
+
+The base score is an integer sum of validated component points, with a rationale per component:
+
+| Component | No resume | With resume |
+|---|---:|---:|
+| Role alignment | 35 | 25 |
+| Location / work setup | 25 | 20 |
+| Experience / seniority | 20 | 15 |
+| Resume skills / qualifications | 0 | 25 |
+| Industry / other preferences | 20 | 15 |
+
+The existing public-company preference applies `round(baseScore * 0.95) + 5` when public status is verified, or zero bonus otherwise. Turning it off returns the base score. The model assigns evidence-based component points; the server validates bounds and calculates totals. Positive resume experience/skills points require an exact supporting resume excerpt; unverifiable evidence gets zero points for that component and an explicit gap. Missing evidence is not proof the applicant lacks a skill. Only configured hard requirements gate eligibility; names, protected attributes and unsupported visa assumptions do not affect scoring. Scores are fit estimates, not hiring probabilities.
+
+The saved breakdown and `matchContext` identify the resume and assessment time. Older jobs remain labeled as having no resume assessment; rerunning search updates rediscovered jobs using the current resume and rubric. Resume text is never combined across uploaded versions.
+
+Previously found eligible jobs also retain their refreshed assessment when they fall below the score threshold or outside today's top-X shortlist. These updates commit under the same run lease while preserving discovery dates and application tracking. The table indicates when profile changes require a new assessment.
+
+## Candidate background and editable base resumes
+
+`candidateBackground` is a private, bounded settings field for user-provided accomplishments shared by the candidate's resume variants. Discovery extracts grounded skill terms from the selected resume and this background; raw background and resume content are sent to OpenAI, not Exa. Both sources inform the resume rubric, and positive experience/skills points require a verifiable excerpt from one source. Background alone also enables that rubric. Prompts distinguish auditing a process from operational ownership and prohibit merging other resume versions, double-counting achievements, or assigning employers/dates to unattributed accomplishments.
+
+Base-resume edits use an authenticated PATCH endpoint with text/name validation and an atomic revision check. Original uploaded text/name and creation time are retained independently of the working copy. Concurrent stale edits return HTTP 409; invalid edits leave the stored record intact. The editor saves on explicit Save or panel navigation, retains input on error, supports Cancel, and warns before unloading unsaved content. A run snapshots the edited resume and background once; saved match context includes resume revision, background usage and a content fingerprint. Changes affect future searches and drafts, not historical assessments. Tailoring records its source revision and whether additional background was included.
+
+Focused resume regression tests cover original preservation, stale revisions, invalid edits, evidence grounding, privacy filters for search terms, parsing failures, and actual one-page PDF limits. Live upload/edit/search/tailoring checks may run when explicitly requested by the owner.
+
+PDF rendering uses a transient compatibility copy that resolves redundant character-unit indents to their saved point values and resolves consecutive Word date tabs to their first left anchor. For Latin-only documents, it uses the existing Latin font metrics instead of legacy East Asian full-width spacing. Empty header/footer references are omitted from this temporary copy so Writer does not reserve an extra empty line above the body. This restores hanging bullets and prevents names, spacing-based dates, and tabbed dates from drifting. The saved downloadable DOCX retains the original properties and ZIP parts. Cached PDFs carry a layout version and refresh from saved DOCX bytes without rewriting content. Actual template fonts are configured locally. Google conversion imports the saved DOCX directly and can reflow text independently. The export button reserves a new browser tab synchronously, then navigates it to the created document after saving edits; failures close the blank tab and preserve the draft. Subsequent clicks reopen the saved document.
+
+## Account isolation
+
+The shared password grants only an invitation-gate cookie. Google authorization uses PKCE, a single-use state record with browser binding, and an OpenID nonce. The server validates the Google-signed ID token (audience, issuer, expiry, nonce and verified email) before issuing a 30-day account cookie. Workspace selection comes from the account database, never a client header or supplied workspace ID. Reconnecting Drive must match the signed-in Google subject. Each user’s encrypted Drive token is stored inside that workspace.
+
+`AsyncLocalStorage` carries the server-resolved workspace through requests, promises and detached search work. All domain queries and atomic updates include `workspace_id`. The database API refuses domain operations without context. Workers enumerate workspaces internally and re-enter the same scope for scheduling, research and maintenance; leases and job/draft promise caches are isolated too. Shared public logo bytes contain no profile or tracking data.
+
+The migration preserves old records under `legacy`. Before allowing them to be claimed, the server resolves the existing authorized Drive account’s email. Only a verified Google-hosted identity with that email receives the legacy workspace; another visitor cannot claim it by signing in first. New users start with no resumes, jobs, credentials or candidate background from another account.
+
+PDF-native tailoring parses the original one-page PDF into allowlisted bullet/skills slots with fixed coordinates, font sizes, baselines and line budgets. Redaction removes only old text, keeping images/vector art and protected text untouched. Replacement embeds the actual source font bytes and explicit ToUnicode maps for reliable extraction. Missing glyphs trigger an AI wording retry, never a substitute font. Rendering before and after at 144 DPI must match exactly outside the edited text regions; too-long edits and layout changes fail before saving. Private original PDF bytes and immutable draft snapshots survive restarts. Editable DOCX companions keep bullet continuation lines in the same paragraph, preserve soft line breaks, and use one right-aligned date stop for employment/education instead of copying variable-sized PDF spaces. Word layout versions regenerate companions and create a corrected Google Doc without overwriting prior user edits. Titles are `base resume name — company name`, including when reopening and renaming earlier exports.
+
+The embedded PDF is rendered from authenticated PDF bytes with a lazy-loaded PDF.js worker, avoiding browser plug-in differences on mobile and desktop. The PDF stays downloadable unchanged. Google Docs companions have independent export layout versions: corrections create a new document rather than overwrite a user-edited existing Doc. Earlier documents stay in the owner’s Drive. Both account and draft revision are checked when saving a returned Google URL.
+
+## Employer logos and resume removal
+
+Employer logos are resolved independently from a grounded official-homepage lookup. Job-board images and arbitrary listing-page favicons are never used. Logo caches are versioned, scoped to the workspace and employer/job identity, and concurrent lookups are shared. Logo enrichment runs on demand outside discovery, so it cannot delay job review. Existing unverified image URLs are replaced on demand; ambiguous identities display initials.
+
+Resume removal privately archives the base text and source file, clears a matching-resume selection when needed, and leaves historical drafts reviewable. Repeated DELETE requests succeed even if the first response was lost. The UI immediately removes the row and offers Undo; restoration is also idempotent.

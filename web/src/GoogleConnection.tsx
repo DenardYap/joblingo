@@ -1,0 +1,9 @@
+import { useState } from 'react';
+import { post } from './lib/api';
+import type { Capabilities } from '../../shared/workspace';
+
+export function GoogleConnection({capabilities,onChange}:{capabilities:Capabilities;onChange:()=>void}) {
+  const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  async function connect(){setBusy(true);setError('');try{const {url}=await post<{url:string}>('/google/connect');window.location.assign(url);}catch(e){setError((e as Error).message);setBusy(false);}}
+  return <section className="settings-section google-connection"><h2>Google Docs</h2><p>{capabilities.googleConnected?'Connected. Tailored resumes can be opened in Google Docs.':'Connect your Google account to edit tailored resumes in Docs.'}</p>{capabilities.googleConfigured?<button type="button" className="button secondary" disabled={busy} onClick={()=>void connect()}>{busy?'Connecting…':capabilities.googleConnected?'Reconnect Google Docs':'Connect Google Docs'}</button>:<details><summary>Set up the Google connection</summary><ol><li>Enable Google Drive API in your Google Cloud project.</li><li>Create an OAuth web client and add <code>{window.location.origin}/api/google/callback</code> as its redirect URI.</li><li>Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in the server environment, then restart.</li><li>Add your Google account as a test user, then connect here.</li></ol></details>}<small>Access is limited to files created or selected through this app.</small>{capabilities.googleConnected&&<button type="button" className="text-button" disabled={busy} onClick={async()=>{setBusy(true);try{await post('/google/disconnect');onChange();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}>Disconnect</button>}{error&&<p role="alert" className="inline-error">{error}</p>}</section>;
+}

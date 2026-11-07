@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+services:
+  - type: web
+    name: personal-job-search
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    preDeployCommand: npm run db:migrate
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: job-search-db
+          property: connectionString
+      - key: APP_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: EXA_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-astra
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+  - type: cron
+    name: daily-job-search
+    runtime: node
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: npm ci --include=dev && npm run build:server
+    startCommand: node dist/server/worker.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: job-search-db
+          property: connectionString
+      - key: EXA_API_KEY
+        fromService:
+          type: web
+          name: personal-job-search
+          envVarKey: EXA_API_KEY
+      - key: OPENAI_API_KEY
+        fromService:
+          type: web
+          name: personal-job-search
+          envVarKey: OPENAI_API_KEY
+      - key: OPENAI_MODEL
+        fromService:
+          type: web
+          name: personal-job-search
+          envVarKey: OPENAI_MODEL
+
+databases:
+  - name: job-search-db
+    plan: basic-256mb
+    databaseName: job_search
+    user: job_search
+    ipAllowList: []
