@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
-import Exa from 'exa-js';
+import { exaClient } from './exa.js';
+export { exaClient } from './exa.js';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { providerError, providerRetryDelay } from './errors.js';
@@ -25,10 +26,6 @@ export async function structured<T>(schema: z.ZodType<T>, instructions: string, 
   }
   if (result.status !== 'completed' || !result.output_parsed) throw new Error('The AI could not produce a complete result. Try again.');
   return result.output_parsed;
-}
-export function exaClient() {
-  if (!process.env.EXA_API_KEY) throw new Error('Configure EXA_API_KEY on the server.');
-  return new Exa(process.env.EXA_API_KEY);
 }
 export async function searchWeb(query: string, count: number, objective: string, window: { startPublishedDate: string; endPublishedDate: string }) {
   const exa = exaClient();

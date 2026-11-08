@@ -14,7 +14,7 @@ const normalize = (value: string) => value.toLowerCase().replace(/\s+/g,' ').tri
 
 // Page favicons belong to the page publisher, which is often a job board. Resolve
 // the employer's own homepage independently before choosing an image from it.
-export function findCompanyLogo(company: string, context: {url:string|null;description:string}): Promise<string|null> {
+export function findCompanyLogo(company: string, context: {url:string|null;description:string}, allowLookup=false): Promise<string|null> {
   if (!hasNamedEmployer(company)) return Promise.resolve(null);
   const key = `${LOGO_VERSION}:${normalizedEmployerName(company)}:${createHash('sha256').update(context.url ?? context.description).digest('hex').slice(0,16)}`;
   const flightKey = `${workspaceId()}:${key}`;
@@ -23,6 +23,7 @@ export function findCompanyLogo(company: string, context: {url:string|null;descr
     const cached = await get<{url:string|null;checkedAt:string}>('logos',key);
     if (cached && Date.now()-Date.parse(cached.checkedAt)<(cached.url ? 30*86400000 : 3600000)) return cached.url;
     try {
+      if(!allowLookup)return null;
       const response = await exaClient().search(`${company} official company website`, {
         type:'auto', contents:{highlights:true},
         objective:`Identify the official website of the exact employer ${company} so its company logo can be displayed. The public posting is ${context.url ?? 'unavailable'}. Employer context: ${context.description.slice(0,800)}. Prefer the employer's own homepage or about page. Exclude job boards, directories, recruiters and similarly named companies.`,

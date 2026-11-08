@@ -8,6 +8,7 @@ export function safeError(error: unknown): string {
 }
 
 export function providerError(provider: string, error: unknown): Error {
+  if(error instanceof Error && 'code' in error && error.code==='EXA_BUDGET_EXCEEDED')return error;
   const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
   const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
   const billing: Record<string,string> = {

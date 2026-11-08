@@ -15,6 +15,13 @@
       "when": 1794036319063,
       "tag": "0001_private_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794095000000,
+      "tag": "0002_exa_budget",
+      "breakpoints": true
     }
   ]
 }

@@ -25,6 +25,7 @@ async function connect(): Promise<Database> {
   const migration=await readFile(resolve('server/db/migrations/0001_private_workspaces.sql'),'utf8');
   // PGlite and pg both execute the idempotent migration as one atomic DO block.
   await db.query(migration);
+  await db.query(await readFile(resolve('server/db/migrations/0002_exa_budget.sql'),'utf8'));
   return db;
 }
 // Root access is restricted to account/session bootstrap and worker enumeration.
@@ -61,10 +62,6 @@ export async function finishRun(owner: string, jobs: Job[], result: Partial<Run>
       INSERT INTO workspace_records(kind,id,data,workspace_id)
       SELECT 'jobs',job->>'id',job,$5 FROM jsonb_array_elements($2::jsonb) job WHERE EXISTS(SELECT 1 FROM owned)
       ON CONFLICT(workspace_id,kind,id) DO UPDATE SET data=workspace_records.data || (excluded.data - 'saved' - 'status' - 'notes' - 'appliedAt' - 'trackingUpdatedAt' - 'foundAt') RETURNING id
-    ), queued_research AS (
-      INSERT INTO workspace_records(kind,id,data,workspace_id)
-      SELECT 'research',id,jsonb_build_object('id','','jobId',id,'status','queued','createdAt',now()),$5 FROM saved_jobs
-      ON CONFLICT(workspace_id,kind,id) DO NOTHING
     ), refreshed_jobs AS (
       UPDATE workspace_records AS existing SET data=existing.data ||
         (assessed - 'saved' - 'status' - 'notes' - 'appliedAt' - 'trackingUpdatedAt' - 'foundAt' - 'lastFoundAt' - 'foundOn')

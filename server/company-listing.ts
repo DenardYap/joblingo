@@ -18,11 +18,11 @@ const inFlight = new Map<string, Promise<CompanyListing>>();
 // research. Ranking must not infer stock-market status from a familiar name.
 export function companyListing(company: string, jobUrl: string): Promise<CompanyListing> {
   if (!hasNamedEmployer(company)) return Promise.resolve(unidentifiedListing());
-  const key = createHash('sha256').update(`identity-v2|${company.toLowerCase().trim()}|${jobUrl}`).digest('hex');
+  const key = createHash('sha256').update(`identity-v3|${normalizedEmployerName(company)}`).digest('hex');
   const cacheKey=`${workspaceId()}:${key}`;const pending = inFlight.get(cacheKey); if (pending) return pending;
   const request = (async () => {
     const cached = await get<CompanyListing>('company-listings', key);
-    const ttl = cached?.status === 'Unknown' ? 3600000 : 7 * 86400000;
+    const ttl = cached?.status === 'Unknown' ? 86400000 : 7 * 86400000;
     if (cached && Date.now() - Date.parse(cached.checkedAt) < ttl) return cached;
     const unknown: CompanyListing = {status:'Unknown',exchange:null,ticker:null,evidence:null,sourceUrl:null,checkedAt:new Date().toISOString()};
     try {
@@ -47,7 +47,7 @@ export function companyListing(company: string, jobUrl: string): Promise<Company
         ? {...ownership,exchange:parsed.status==='Public'?parsed.exchange:null,ticker:parsed.status==='Public'?parsed.ticker:null,checkedAt:unknown.checkedAt} : unknown;
       await put('company-listings',key,result);
       return result;
-    } catch { return unknown; }
+    } catch(error) { if(error instanceof Error && 'code' in error && error.code==='EXA_BUDGET_EXCEEDED')throw error;return unknown; }
   })().finally(()=>inFlight.delete(cacheKey));
   inFlight.set(cacheKey,request); return request;
 }

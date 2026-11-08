@@ -119,7 +119,7 @@ export async function checkListing(url: string, title?: string): Promise<Listing
     const verdict = await structured(z.object({status:z.enum(['Open','Closed','Unverified']),evidence:z.string().nullable(),reason:z.string()}), 'The server has just fetched the supplied URL live with maxAgeHours=0. Your task is to assess this returned page, not browse or fetch it yourself. Check the CURRENT availability of the specific requested job from that freshly fetched text. Open requires this exact job identity plus an active application invitation or application form. A job description alone, a generic Apply button without the matching role, search results, login walls or related jobs are insufficient: return Unverified. Expired, closed, filled, or no-longer-accepting notices override everything. Quote an exact continuous excerpt supporting the verdict. Do not use guesses, job fit, crawl dates, or general company hiring to infer availability.', {url,title,page:content.text});
     if (!verdict.evidence || normalized(verdict.evidence).length < 5 || !normalized(content.text).includes(normalized(verdict.evidence))) return result;
     return {...result,availability:verdict.status,availabilityReason:verdict.reason};
-  } catch { return result; }
+  } catch(error) { if(error instanceof Error && 'code' in error && error.code==='EXA_BUDGET_EXCEEDED')throw error;return result; }
 }
 
 const inFlight = new Map<string,Promise<Job>>();

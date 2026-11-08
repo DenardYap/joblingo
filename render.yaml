@@ -20,6 +20,8 @@ services:
         sync: false
       - key: EXA_API_KEY
         sync: false
+      - key: EXA_DAILY_BUDGET_USD
+        value: "2"
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
@@ -50,6 +52,11 @@ services:
           type: web
           name: personal-job-search
           envVarKey: EXA_API_KEY
+      - key: EXA_DAILY_BUDGET_USD
+        fromService:
+          type: web
+          name: personal-job-search
+          envVarKey: EXA_DAILY_BUDGET_USD
       - key: OPENAI_API_KEY
         fromService:
           type: web

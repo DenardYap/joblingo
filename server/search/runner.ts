@@ -12,6 +12,7 @@ import { assessJob, calculateScore, matchingFingerprint, matchingResume, resumeS
 import { canonicalJobUrl, discoveryPlan, discoverUntilTarget } from './discovery.js';
 import { deduplicateJobs, mergeJobCopies, sameJob } from '../../shared/job-deduplication.js';
 import { discoverWithAgent } from './agent-discovery.js';
+import { exaLimitUsd, ExaBudgetError } from '../exa-budget.js';
 import { detectAuthorizationRestrictions, eligibilityState } from '../../shared/work-authorization.js';
 
 export function searchReady() { return aiReady() && Boolean(process.env.EXA_API_KEY); }
@@ -23,6 +24,7 @@ export function localClock(date: Date, timezone: string) {
 function source(value: string) { const host = new URL(value).hostname; return host.includes('linkedin.') ? 'LinkedIn' : host.includes('indeed.') ? 'Indeed' : host.includes('glassdoor.') ? 'Glassdoor' : 'Company sites'; }
 export async function startRun(trigger: Run['trigger'], background = true): Promise<Run | null> {
   if (!searchReady()) throw new Error('Live search needs EXA_API_KEY, OPENAI_API_KEY, and OPENAI_MODEL on the server.');
+  if(exaLimitUsd()===0)throw new ExaBudgetError();
   const config = await preferences();
   const clock = localClock(new Date(), config.timezone);
   if (trigger === 'Scheduled' && (!config.enabled || clock.time < config.localTime)) return null;
